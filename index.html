@@ -29,6 +29,12 @@ ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10p
 li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
 li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(--mute);margin-bottom:2px}
 .empty{color:var(--mute);font-family:system-ui,sans-serif;font-size:14px}
+.add{display:flex;gap:8px;margin-bottom:8px}
+.add input,li input{flex:1;min-width:0;width:100%;font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.btn{font:14px system-ui,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.acts{display:flex;gap:8px;margin-top:10px}
+input:focus-visible,.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:no-preference){#mic{transition:box-shadow .2s,border-color .2s}}
 </style>
 </head>
@@ -45,7 +51,12 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
     <div id="live">Your words will appear here.</div>
   </div>
 
-  <label class="row" style="margin-top:0">
+  <div class="add">
+    <input id="typed" type="text" placeholder="Or type a note" aria-label="Type a note" enterkeyhint="done">
+    <button id="addBtn" type="button" class="btn pri">Add</button>
+  </div>
+
+  <label class="row" style="margin-top:20px">
     <span>Language</span>
     <select id="lang">
       <option value="en-US">English</option>
@@ -56,7 +67,7 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
     </select>
   </label>
 
-  <div class="row"><span>Saved this session</span><button class="link" id="clear" type="button">Clear</button></div>
+  <div class="row"><span>Your notes</span><button class="link" id="clear" type="button">Clear</button></div>
   <ul id="list"></ul>
 </main>
 
@@ -73,15 +84,43 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
 
   function save(){ try { localStorage.setItem('voice-notes', JSON.stringify(notes)); } catch (e) {} }
 
+  function btn(label, fn, pri){
+    var b = document.createElement('button'); b.type = 'button';
+    b.className = 'btn' + (pri ? ' pri' : ''); b.textContent = label;
+    b.addEventListener('click', function(){ fn(); }); return b;
+  }
+
+  function startEdit(li, n){
+    li.innerHTML = '';
+    var inp = document.createElement('input'); inp.type = 'text'; inp.value = n.text; inp.setAttribute('aria-label', 'Edit note');
+    var a = document.createElement('div'); a.className = 'acts';
+    function commit(){ var v = inp.value.trim(); if (v) { n.text = v; save(); } render(); }
+    a.appendChild(btn('Save', commit, true));
+    a.appendChild(btn('Cancel', render));
+    inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') commit(); });
+    li.appendChild(inp); li.appendChild(a); inp.focus();
+  }
+
   function render(){
     list.innerHTML = '';
-    if (!notes.length) { var p = document.createElement('p'); p.className = 'empty'; p.textContent = 'Nothing yet. Your first note will show up here.'; list.appendChild(p); return; }
+    if (!notes.length) { var p = document.createElement('p'); p.className = 'empty'; p.textContent = 'Nothing yet. Speak or type your first note.'; list.appendChild(p); return; }
     notes.slice().reverse().forEach(function(n){
-      var li = document.createElement('li'), t = document.createElement('time'), s = document.createElement('span');
+      var li = document.createElement('li'), t = document.createElement('time'), s = document.createElement('span'), a = document.createElement('div');
       t.textContent = new Date(n.at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
-      s.textContent = n.text; li.appendChild(t); li.appendChild(s); list.appendChild(li);
+      s.textContent = n.text; a.className = 'acts';
+      a.appendChild(btn('Edit', function(){ startEdit(li, n); }));
+      a.appendChild(btn('Delete', function(){ notes = notes.filter(function(x){ return x !== n; }); save(); render(); }));
+      li.appendChild(t); li.appendChild(s); li.appendChild(a); list.appendChild(li);
     });
   }
+
+  var typed = document.getElementById('typed');
+  function addTyped(){
+    var v = typed.value.trim(); if (!v) return;
+    notes.push({text: v, at: Date.now()}); typed.value = ''; save(); render();
+  }
+  document.getElementById('addBtn').addEventListener('click', addTyped);
+  typed.addEventListener('keydown', function(e){ if (e.key === 'Enter') addTyped(); });
 
   function showLive(){
     var txt = (finalText + ' ' + interim).trim();
@@ -102,7 +141,7 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
     statusEl.textContent = 'This browser can\u2019t do speech recognition. Open the page in Chrome, Edge or Safari.';
   } else {
     rec = new SR();
-    rec.continuous = true;
+    rec.continuous = !/iPhone|iPad|iPod/.test(navigator.userAgent);
     rec.interimResults = true;
 
     rec.onresult = function(e){
@@ -115,6 +154,7 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
       showLive();
     };
     rec.onerror = function(e){
+      if (e.error === 'aborted') return;
       var m = {'not-allowed':'Microphone blocked. Allow microphone access for this page and try again.',
                'service-not-allowed':'Microphone blocked. Allow microphone access for this page and try again.',
                'no-speech':'Didn\u2019t hear anything. Tap the microphone and try again.',
@@ -126,7 +166,7 @@ li time{display:block;font-family:system-ui,sans-serif;font-size:12px;color:var(
       var text = (finalText + ' ' + interim).trim();
       if (text) { notes.push({text: text, at: Date.now()}); save(); render(); }
       finalText = ''; interim = ''; showLive();
-      if (listening) setUI(false, 'Saved. Tap to record another.');
+      if (listening) setUI(false, text ? 'Saved. Tap to record another.' : 'Didn\u2019t catch that. Tap and try again.');
       else if (statusEl.textContent === 'Listening\u2026' || statusEl.textContent === 'Stopping\u2026') statusEl.textContent = text ? 'Saved. Tap to record another.' : 'Ready';
     };
 
